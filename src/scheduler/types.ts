@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+export const JobTypeSchema = z.enum(["standard", "wakeup", "free_time"]);
+export type JobType = z.infer<typeof JobTypeSchema>;
+
+export const WakeupContextSchema = z.object({
+	summary: z.string().describe("Summary of what was being worked on"),
+	nextSteps: z.string().describe("What to do next when waking up"),
+});
+export type WakeupContext = z.infer<typeof WakeupContextSchema>;
+
 export const ScheduleKindSchema = z.enum(["at", "every", "cron"]);
 export type ScheduleKind = z.infer<typeof ScheduleKindSchema>;
 
@@ -38,6 +47,8 @@ export type ScheduledJob = {
 	enabled: boolean;
 	schedule: Schedule;
 	task: string;
+	jobType: JobType;
+	context: WakeupContext | null;
 	delivery: JobDelivery;
 	status: JobStatus;
 	lastRunAt: string | null;
@@ -58,6 +69,8 @@ export type JobCreateInput = {
 	description?: string;
 	schedule: Schedule;
 	task: string;
+	jobType?: JobType;
+	context?: WakeupContext;
 	delivery?: JobDelivery;
 	deleteAfterRun?: boolean;
 	createdBy?: string;
@@ -71,6 +84,8 @@ export type JobRow = {
 	schedule_kind: string;
 	schedule_value: string;
 	task: string;
+	job_type: string;
+	context: string | null;
 	delivery_channel: string;
 	delivery_target: string;
 	status: string;

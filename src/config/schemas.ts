@@ -7,6 +7,11 @@ export const PeerConfigSchema = z.object({
 	enabled: z.boolean().default(true),
 });
 
+export const SchedulerConfigSchema = z.object({
+	self_schedule_min_interval_minutes: z.number().int().min(1).default(30),
+	self_schedule_max_pending: z.number().int().min(1).default(5),
+});
+
 export const PhantomConfigSchema = z.object({
 	name: z.string().min(1),
 	domain: z.string().optional(),
@@ -18,6 +23,7 @@ export const PhantomConfigSchema = z.object({
 	max_budget_usd: z.number().min(0).default(0),
 	timeout_minutes: z.number().min(1).default(240),
 	peers: z.record(z.string(), PeerConfigSchema).optional(),
+	scheduler: SchedulerConfigSchema.default({}),
 });
 
 export const SlackChannelConfigSchema = z.object({

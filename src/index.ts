@@ -173,7 +173,14 @@ async function main(): Promise<void> {
 		const registry = mcpServer.getDynamicToolRegistry();
 
 		// Wire scheduler into the agent (Slack channel set later after channel init)
-		scheduler = new Scheduler({ db, runtime });
+		scheduler = new Scheduler({
+			db,
+			runtime,
+			selfScheduleLimits: {
+				minIntervalMs: config.scheduler.self_schedule_min_interval_minutes * 60 * 1000,
+				maxPending: config.scheduler.self_schedule_max_pending,
+			},
+		});
 
 		// Pass factories (not singletons) so each query() gets fresh MCP server instances.
 		// The underlying registries (DynamicToolRegistry, Scheduler) are singletons.

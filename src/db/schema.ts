@@ -84,6 +84,10 @@ export const MIGRATIONS: string[] = [
 		access_count INTEGER NOT NULL DEFAULT 0
 	)`,
 
+	// Wakeup and free-time job support
+	`ALTER TABLE scheduled_jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'standard'`,
+	"ALTER TABLE scheduled_jobs ADD COLUMN context TEXT",
+
 	`CREATE TABLE IF NOT EXISTS secret_requests (
 		request_id TEXT PRIMARY KEY,
 		fields_json TEXT NOT NULL,

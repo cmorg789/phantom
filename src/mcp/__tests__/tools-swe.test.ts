@@ -137,6 +137,7 @@ describe("SWE MCP Tools", () => {
 					effort: "max" as const,
 					max_budget_usd: 0,
 					timeout_minutes: 240,
+					scheduler: { self_schedule_min_interval_minutes: 30, self_schedule_max_pending: 5 },
 				},
 				db,
 				startedAt: Date.now(),
