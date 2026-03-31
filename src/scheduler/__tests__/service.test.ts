@@ -192,12 +192,8 @@ describe("Scheduler", () => {
 
 	test("runJobNow delivers result to Slack owner", async () => {
 		const mockSlack = createMockSlackChannel();
-		const scheduler = new Scheduler({
-			db,
-			runtime: mockRuntime as never,
-			slackChannel: mockSlack as never,
-			ownerUserId: "U_OWNER",
-		});
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		scheduler.setPrimaryChannel("slack", mockSlack as never, "U_OWNER");
 
 		const job = scheduler.createJob({
 			name: "Delivered",
@@ -211,12 +207,8 @@ describe("Scheduler", () => {
 
 	test("runJobNow delivers to specific channel", async () => {
 		const mockSlack = createMockSlackChannel();
-		const scheduler = new Scheduler({
-			db,
-			runtime: mockRuntime as never,
-			slackChannel: mockSlack as never,
-			ownerUserId: "U_OWNER",
-		});
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		scheduler.setPrimaryChannel("slack", mockSlack as never, "U_OWNER");
 
 		const job = scheduler.createJob({
 			name: "Channel Post",
@@ -231,12 +223,8 @@ describe("Scheduler", () => {
 
 	test("runJobNow with delivery=none does not call Slack", async () => {
 		const mockSlack = createMockSlackChannel();
-		const scheduler = new Scheduler({
-			db,
-			runtime: mockRuntime as never,
-			slackChannel: mockSlack as never,
-			ownerUserId: "U_OWNER",
-		});
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		scheduler.setPrimaryChannel("slack", mockSlack as never, "U_OWNER");
 
 		const job = scheduler.createJob({
 			name: "Silent",

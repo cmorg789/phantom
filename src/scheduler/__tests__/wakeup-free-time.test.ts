@@ -206,12 +206,8 @@ describe("Free time jobs", () => {
 
 	test("free_time job delivers result to Slack", async () => {
 		const mockSlack = createMockSlackChannel();
-		const scheduler = new Scheduler({
-			db,
-			runtime: mockRuntime as never,
-			slackChannel: mockSlack as never,
-			ownerUserId: "U_OWNER",
-		});
+		const scheduler = new Scheduler({ db, runtime: mockRuntime as never });
+		scheduler.setPrimaryChannel("slack", mockSlack as never, "U_OWNER");
 
 		const job = scheduler.createJob({
 			name: "Free time delivery",

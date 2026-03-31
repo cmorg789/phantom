@@ -21,6 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@slack/bolt": "^4.6.0",
     "croner": "^10.0.1",
+    "discord.js": "^14.26.0",
     "imapflow": "^1.2.18",
     "nodemailer": "^8.0.4",
     "resend": "^6.9.4",

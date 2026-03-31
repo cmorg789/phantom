@@ -66,8 +66,17 @@ export const WebhookChannelConfigSchema = z.object({
 	sync_timeout_ms: z.number().int().min(1000).default(25000),
 });
 
+export const DiscordChannelConfigSchema = z.object({
+	enabled: z.boolean().default(false),
+	bot_token: z.string().min(1),
+	guild_id: z.string().min(1),
+	default_channel_id: z.string().optional(),
+	owner_user_id: z.string().optional(),
+});
+
 export const ChannelsConfigSchema = z.object({
 	slack: SlackChannelConfigSchema.optional(),
+	discord: DiscordChannelConfigSchema.optional(),
 	telegram: TelegramChannelConfigSchema.optional(),
 	email: EmailChannelConfigSchema.optional(),
 	webhook: WebhookChannelConfigSchema.optional(),

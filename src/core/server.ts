@@ -1,5 +1,5 @@
 import type { AgentRuntime } from "../agent/runtime.ts";
-import type { SlackChannel } from "../channels/slack.ts";
+import type { PrimaryChannel } from "../channels/primary-channel.ts";
 import type { PhantomConfig } from "../config/types.ts";
 import { AuthMiddleware } from "../mcp/auth.ts";
 import { loadMcpConfig } from "../mcp/config.ts";
@@ -19,8 +19,7 @@ type WebhookHandler = (req: Request) => Promise<Response>;
 type PeerHealthProvider = () => Record<string, { healthy: boolean; latencyMs: number; error?: string }>;
 type TriggerDeps = {
 	runtime: AgentRuntime;
-	slackChannel?: SlackChannel;
-	ownerUserId?: string;
+	primaryChannels?: Map<string, { channel: PrimaryChannel; ownerUserId?: string }>;
 };
 
 let memoryHealthProvider: MemoryHealthProvider | null = null;
@@ -184,17 +183,21 @@ async function handleTrigger(req: Request): Promise<Response> {
 	try {
 		const response = await triggerDeps.runtime.handleMessage("trigger", conversationId, body.task);
 
-		// Deliver via Slack if requested
+		// Deliver via configured channel if requested
 		const deliveryChannel = body.delivery?.channel ?? "slack";
 		const deliveryTarget = body.delivery?.target ?? "owner";
 
-		if (deliveryChannel === "slack" && triggerDeps.slackChannel) {
-			if (deliveryTarget === "owner" && triggerDeps.ownerUserId) {
-				await triggerDeps.slackChannel.sendDm(triggerDeps.ownerUserId, response.text);
-			} else if (deliveryTarget.startsWith("C")) {
-				await triggerDeps.slackChannel.postToChannel(deliveryTarget, response.text);
-			} else if (deliveryTarget.startsWith("U")) {
-				await triggerDeps.slackChannel.sendDm(deliveryTarget, response.text);
+		if (deliveryChannel !== "none" && triggerDeps.primaryChannels) {
+			const entry = triggerDeps.primaryChannels.get(deliveryChannel);
+			if (entry) {
+				const { channel, ownerUserId } = entry;
+				if (deliveryTarget === "owner" && ownerUserId) {
+					await channel.sendDm(ownerUserId, response.text);
+				} else if (deliveryTarget.startsWith("C")) {
+					await channel.postToChannel(deliveryTarget, response.text);
+				} else if (deliveryTarget !== "owner") {
+					await channel.sendDm(deliveryTarget, response.text);
+				}
 			}
 		}
 

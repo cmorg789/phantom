@@ -4,8 +4,11 @@ import { createInProcessToolServer } from "./agent/in-process-tools.ts";
 import { AgentRuntime } from "./agent/runtime.ts";
 import type { RuntimeEvent } from "./agent/runtime.ts";
 import { CliChannel } from "./channels/cli.ts";
+import { setDiscordActionFollowUpHandler } from "./channels/discord-actions.ts";
+import { DiscordChannel } from "./channels/discord.ts";
 import { EmailChannel } from "./channels/email.ts";
 import { emitFeedback, setFeedbackHandler } from "./channels/feedback.ts";
+import type { PrimaryChannel } from "./channels/primary-channel.ts";
 import { formatToolActivity } from "./channels/progress-stream.ts";
 import { createProgressStream } from "./channels/progress-stream.ts";
 import { ChannelRouter } from "./channels/router.ts";
@@ -269,6 +272,33 @@ async function main(): Promise<void> {
 		console.log("[phantom] Slack channel registered");
 	}
 
+	// Register Discord channel
+	let discordChannel: DiscordChannel | null = null;
+	if (channelsConfig?.discord?.enabled && channelsConfig.discord.bot_token) {
+		discordChannel = new DiscordChannel({
+			botToken: channelsConfig.discord.bot_token,
+			guildId: channelsConfig.discord.guild_id,
+			defaultChannelId: channelsConfig.discord.default_channel_id,
+			ownerUserId: channelsConfig.discord.owner_user_id,
+		});
+		discordChannel.setPhantomName(config.name);
+
+		// Wire Discord reaction feedback to evolution
+		discordChannel.onReaction((event) => {
+			emitFeedback({
+				type: event.isPositive ? "positive" : "negative",
+				conversationId: `discord:${event.channel}:${event.messageTs}`,
+				messageTs: event.messageTs,
+				userId: event.userId,
+				source: "reaction",
+				timestamp: Date.now(),
+			});
+		});
+
+		router.register(discordChannel);
+		console.log("[phantom] Discord channel registered");
+	}
+
 	// Register Telegram channel
 	let telegramChannel: TelegramChannel | null = null;
 	if (channelsConfig?.telegram?.enabled && channelsConfig.telegram.bot_token) {
@@ -317,7 +347,7 @@ async function main(): Promise<void> {
 	}
 
 	// Register CLI channel (fallback for local dev)
-	if (!slackChannel && !telegramChannel) {
+	if (!slackChannel && !discordChannel && !telegramChannel) {
 		const cli = new CliChannel();
 		router.register(cli);
 	}
@@ -326,19 +356,29 @@ async function main(): Promise<void> {
 	setChannelHealthProvider(() => {
 		const health: Record<string, boolean> = {};
 		if (slackChannel) health.slack = slackChannel.isConnected();
+		if (discordChannel) health.discord = discordChannel.isConnected();
 		if (telegramChannel) health.telegram = telegramChannel.isConnected();
 		if (emailChannel) health.email = emailChannel.isConnected();
 		if (webhookChannel) health.webhook = webhookChannel.isConnected();
 		return health;
 	});
 
-	// Wire action follow-up handler (button clicks -> agent)
+	// Wire action follow-up handler (button clicks -> agent) for Slack
 	setActionFollowUpHandler(async (params) => {
 		const followUpText = params.actionPayload
 			? `User clicked "${params.actionLabel}". Context: ${params.actionPayload}`
 			: `User clicked "${params.actionLabel}". Please follow up accordingly.`;
 
 		await runtime.handleMessage("slack", params.conversationId, followUpText);
+	});
+
+	// Wire action follow-up handler for Discord
+	setDiscordActionFollowUpHandler(async (params) => {
+		const followUpText = params.actionPayload
+			? `User clicked "${params.actionLabel}". Context: ${params.actionPayload}`
+			: `User clicked "${params.actionLabel}". Please follow up accordingly.`;
+
+		await runtime.handleMessage("discord", params.conversationId, followUpText);
 	});
 
 	// Onboarding detection
@@ -362,49 +402,61 @@ async function main(): Promise<void> {
 		existing.user.push(msg.text);
 		conversationMessages.set(convKey, existing);
 
-		const isSlack = msg.channelId === "slack" && slackChannel && msg.metadata;
 		const isTelegram = msg.channelId === "telegram" && telegramChannel && msg.metadata;
-		const slackChannelId = isSlack ? (msg.metadata?.slackChannel as string) : null;
-		const slackThreadTs = isSlack ? (msg.metadata?.slackThreadTs as string) : null;
-		const slackMessageTs = isSlack ? (msg.metadata?.slackMessageTs as string) : null;
 		const telegramChatId = isTelegram ? (msg.metadata?.telegramChatId as number) : null;
 
-		// Slack: set up status reactions on the user's message
+		// Resolve primary channel and extract platform-specific metadata
+		const primaryChannel = primaryChannels.get(msg.channelId)?.channel ?? null;
+		let sourceChannelId: string | null = null;
+		let sourceThreadId: string | null = null;
+		let sourceMessageId: string | null = null;
+
+		if (msg.channelId === "slack" && msg.metadata) {
+			sourceChannelId = (msg.metadata.slackChannel as string) ?? null;
+			sourceThreadId = (msg.metadata.slackThreadTs as string) ?? null;
+			sourceMessageId = (msg.metadata.slackMessageTs as string) ?? null;
+		} else if (msg.channelId === "discord" && msg.metadata) {
+			sourceChannelId = (msg.metadata.discordChannelId as string) ?? null;
+			sourceThreadId = (msg.metadata.discordThreadId as string) ?? sourceChannelId;
+			sourceMessageId = (msg.metadata.discordMessageId as string) ?? null;
+		}
+
+		// Primary channel: set up status reactions on the user's message
 		let statusReactions: ReturnType<typeof createStatusReactionController> | null = null;
-		if (isSlack && slackChannel && slackChannelId && slackMessageTs) {
-			const sc = slackChannel;
-			const ch = slackChannelId;
-			const mts = slackMessageTs;
+		if (primaryChannel && sourceChannelId && sourceMessageId) {
+			const pc = primaryChannel;
+			const ch = sourceChannelId;
+			const mts = sourceMessageId;
 			statusReactions = createStatusReactionController({
 				adapter: {
-					addReaction: (emoji) => sc.addReaction(ch, mts, emoji),
-					removeReaction: (emoji) => sc.removeReaction(ch, mts, emoji),
+					addReaction: (emoji) => pc.addReaction(ch, mts, emoji),
+					removeReaction: (emoji) => pc.removeReaction(ch, mts, emoji),
 				},
 				onError: (err) => {
 					const errMsg = err instanceof Error ? err.message : String(err);
-					console.warn(`[slack] Reaction error: ${errMsg}`);
+					console.warn(`[${msg.channelId}] Reaction error: ${errMsg}`);
 				},
 			});
 			statusReactions.setQueued();
 		}
 
-		// Slack: set up progress streaming in the thread
+		// Primary channel: set up progress streaming in the thread
 		let progressStream: ReturnType<typeof createProgressStream> | null = null;
-		if (isSlack && slackChannel && slackChannelId && slackThreadTs) {
-			const sc = slackChannel;
-			const ch = slackChannelId;
-			const tts = slackThreadTs;
+		if (primaryChannel && sourceChannelId && sourceThreadId) {
+			const pc = primaryChannel;
+			const ch = sourceChannelId;
+			const tts = sourceThreadId;
 			progressStream = createProgressStream({
 				adapter: {
-					postMessage: (_t) => sc.postThinking(ch, tts).then((ts) => ts ?? ""),
-					updateMessage: (msgId, updatedText) => sc.updateMessage(ch, msgId, updatedText),
+					postMessage: (_t) => pc.postThinking(ch, tts).then((ts) => ts ?? ""),
+					updateMessage: (msgId, updatedText) => pc.updateMessage(ch, msgId, updatedText),
 				},
 				onFinish: async (messageId, text) => {
-					await sc.updateWithFeedback(ch, messageId, text);
+					await pc.updateWithFeedback(ch, messageId, text);
 				},
 				onError: (err) => {
 					const errMsg = err instanceof Error ? err.message : String(err);
-					console.warn(`[slack] Progress stream error: ${errMsg}`);
+					console.warn(`[${msg.channelId}] Progress stream error: ${errMsg}`);
 				},
 			});
 			await progressStream.start();
@@ -455,13 +507,13 @@ async function main(): Promise<void> {
 
 		// Deliver the response
 		if (progressStream) {
-			// Slack: update the progress message with the final response + feedback buttons
+			// Primary channel: update the progress message with the final response + feedback buttons
 			await progressStream.finish(response.text);
-		} else if (isSlack && slackChannel && slackChannelId && slackThreadTs) {
-			// Slack fallback: send direct reply with feedback
-			const thinkingTs = await slackChannel.postThinking(slackChannelId, slackThreadTs);
+		} else if (primaryChannel && sourceChannelId && sourceThreadId) {
+			// Primary channel fallback: send direct reply with feedback
+			const thinkingTs = await primaryChannel.postThinking(sourceChannelId, sourceThreadId);
 			if (thinkingTs) {
-				await slackChannel.updateWithFeedback(slackChannelId, thinkingTs, response.text);
+				await primaryChannel.updateWithFeedback(sourceChannelId, thinkingTs, response.text);
 			}
 		} else {
 			// All other channels: send via router
@@ -597,43 +649,71 @@ async function main(): Promise<void> {
 
 	await router.connectAll();
 
-	// Wire Slack into scheduler and /trigger now that channels are connected
-	if (scheduler && slackChannel && channelsConfig?.slack?.owner_user_id) {
-		scheduler.setSlackChannel(slackChannel, channelsConfig.slack.owner_user_id);
+	// Build primary channels map for scheduler and trigger delivery
+	const primaryChannels = new Map<string, { channel: PrimaryChannel; ownerUserId?: string }>();
+	if (slackChannel) {
+		primaryChannels.set("slack", { channel: slackChannel, ownerUserId: channelsConfig?.slack?.owner_user_id });
 	}
+	if (discordChannel) {
+		primaryChannels.set("discord", { channel: discordChannel, ownerUserId: channelsConfig?.discord?.owner_user_id });
+	}
+
+	// Wire channels into scheduler
 	if (scheduler) {
+		for (const [id, entry] of primaryChannels) {
+			scheduler.setPrimaryChannel(id, entry.channel, entry.ownerUserId);
+		}
 		await scheduler.start();
 	}
 
 	// Wire /trigger endpoint
 	setTriggerDeps({
 		runtime,
-		slackChannel: slackChannel ?? undefined,
-		ownerUserId: channelsConfig?.slack?.owner_user_id,
+		primaryChannels: primaryChannels.size > 0 ? primaryChannels : undefined,
 	});
 
 	// Wire secret save notification: when the user saves credentials via the form,
-	// wake the agent in the original Slack thread so it can respond naturally.
+	// wake the agent in the original thread so it can respond naturally.
 	// This follows the scheduler pattern: route a synthetic message through the runtime.
 	setSecretSavedCallback(async (requestId, secretNames) => {
 		const request = getSecretRequest(db, requestId);
 		if (!request?.notifyChannelId || !request.notifyThread) return;
 
-		const conversationId = `slack:${request.notifyChannelId}:${request.notifyThread}`;
+		// Determine which channel the secret request came from
+		const notifyChannel = request.notifyChannel ?? "slack";
+		const conversationId = `${notifyChannel}:${request.notifyChannelId}:${request.notifyThread}`;
 		const prompt = `The user just saved credentials via the secure form: ${secretNames.join(", ")}. Use phantom_get_secret to retrieve them and continue with the task you were working on.`;
 
 		// Non-blocking: wake the agent, let it decide what to say (Cardinal Rule)
-		runtime.handleMessage("slack", conversationId, prompt).catch((err: unknown) => {
+		runtime.handleMessage(notifyChannel, conversationId, prompt).catch((err: unknown) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.warn(`[secrets] Failed to wake agent after secret save: ${msg}`);
 		});
 	});
 
 	// Post onboarding intro after channels are connected
-	if (isFirstRun(configDir) && activeRole && slackChannel) {
-		const ownerUserId = channelsConfig?.slack?.owner_user_id;
-		const defaultChannel = channelsConfig?.slack?.default_channel_id;
-		const defaultUser = channelsConfig?.slack?.default_user_id;
+	// Use the first available primary channel (prefer Slack, then Discord)
+	const onboardingChannel: PrimaryChannel | null = slackChannel ?? discordChannel ?? null;
+	if (isFirstRun(configDir) && activeRole && onboardingChannel) {
+		let ownerUserId: string | undefined;
+		let defaultChannel: string | undefined;
+		let defaultUser: string | undefined;
+		let profilerClient: import("./onboarding/flow.ts").ProfilerClient | undefined;
+
+		if (slackChannel && channelsConfig?.slack) {
+			ownerUserId = channelsConfig.slack.owner_user_id;
+			defaultChannel = channelsConfig.slack.default_channel_id;
+			defaultUser = channelsConfig.slack.default_user_id;
+			profilerClient = { type: "slack", client: slackChannel.getClient() };
+		} else if (discordChannel && channelsConfig?.discord) {
+			ownerUserId = channelsConfig.discord.owner_user_id;
+			defaultChannel = channelsConfig.discord.default_channel_id;
+			profilerClient = {
+				type: "discord",
+				client: discordChannel.getClient(),
+				guildId: channelsConfig.discord.guild_id,
+			};
+		}
 
 		// DM the owner first (primary path), fall back to channel or default_user_id
 		let target: OnboardingTarget | null = null;
@@ -646,8 +726,7 @@ async function main(): Promise<void> {
 		}
 
 		if (target) {
-			const slackClient = slackChannel.getClient();
-			const profile = await startOnboarding(slackChannel, target, config.name, activeRole, db, slackClient);
+			const profile = await startOnboarding(onboardingChannel, target, config.name, activeRole, db, profilerClient);
 
 			// Inject owner profile into onboarding prompt for personalized agent conversation
 			if (profile && needsOnboarding) {
@@ -658,7 +737,7 @@ async function main(): Promise<void> {
 			// Also post to channel if owner DM was sent and channel is configured
 			if (target.type === "dm" && defaultChannel) {
 				const channelIntro = `Hey team, I'm ${config.name}. I just joined as a ${activeRole.name} co-worker. I'll be working with ${profile?.name ?? "the team"} - feel free to @mention me if you need anything.`;
-				await slackChannel.postToChannel(defaultChannel, channelIntro);
+				await onboardingChannel.postToChannel(defaultChannel, channelIntro);
 				console.log(`[onboarding] Also posted introduction to channel ${defaultChannel}`);
 			}
 		} else {

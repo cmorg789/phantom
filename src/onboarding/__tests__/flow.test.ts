@@ -174,7 +174,7 @@ describe("startOnboarding with profiling", () => {
 		const client = createMockSlackClient();
 		const target: OnboardingTarget = { type: "dm", userId: "U0A9P3CC5EE" };
 
-		await startOnboarding(slack as never, target, "Scout", mockRole, db, client);
+		await startOnboarding(slack as never, target, "Scout", mockRole, db, { type: "slack", client });
 
 		expect(slack.sendDm).toHaveBeenCalledTimes(1);
 		const text = slack.sendDm.mock.calls[0][1] as string;
@@ -188,7 +188,7 @@ describe("startOnboarding with profiling", () => {
 		const client = createMockSlackClient();
 		const target: OnboardingTarget = { type: "dm", userId: "U0A9P3CC5EE" };
 
-		await startOnboarding(slack as never, target, "Scout", mockRole, db, client);
+		await startOnboarding(slack as never, target, "Scout", mockRole, db, { type: "slack", client });
 
 		const text = slack.sendDm.mock.calls[0][1] as string;
 		expect(text).toContain("Ghostwright");
@@ -200,7 +200,7 @@ describe("startOnboarding with profiling", () => {
 		const client = createMockSlackClient();
 		const target: OnboardingTarget = { type: "dm", userId: "U0A9P3CC5EE" };
 
-		const profile = await startOnboarding(slack as never, target, "Scout", mockRole, db, client);
+		const profile = await startOnboarding(slack as never, target, "Scout", mockRole, db, { type: "slack", client });
 
 		expect(profile).not.toBeNull();
 		expect(profile?.name).toBe("Cheema");
@@ -221,7 +221,10 @@ describe("startOnboarding with profiling", () => {
 		};
 		const target: OnboardingTarget = { type: "dm", userId: "U04XYZ789" };
 
-		const profile = await startOnboarding(slack as never, target, "Scout", mockRole, db, failingClient);
+		const profile = await startOnboarding(slack as never, target, "Scout", mockRole, db, {
+			type: "slack",
+			client: failingClient,
+		});
 
 		const text = slack.sendDm.mock.calls[0][1] as string;
 		// Generic fallback when profile has no real data
@@ -234,7 +237,7 @@ describe("startOnboarding with profiling", () => {
 		const client = createMockSlackClient();
 		const target: OnboardingTarget = { type: "channel", channelId: "C04ABC123" };
 
-		await startOnboarding(slack as never, target, "Scout", mockRole, db, client);
+		await startOnboarding(slack as never, target, "Scout", mockRole, db, { type: "slack", client });
 
 		expect(client.users.info).not.toHaveBeenCalled();
 	});

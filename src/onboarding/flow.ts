@@ -1,10 +1,16 @@
 import type { Database } from "bun:sqlite";
-import type { SlackChannel } from "../channels/slack.ts";
+import type { Client as DiscordClient } from "discord.js";
+import type { PrimaryChannel } from "../channels/primary-channel.ts";
 import type { RoleTemplate } from "../roles/types.ts";
+import { profileDiscordOwner } from "./discord-profiler.ts";
 import { type OwnerProfile, type SlackProfileClient, hasPersonalizationData, profileOwner } from "./profiler.ts";
 import { markOnboardingStarted } from "./state.ts";
 
 export type OnboardingTarget = { type: "channel"; channelId: string } | { type: "dm"; userId: string };
+
+export type ProfilerClient =
+	| { type: "slack"; client: SlackProfileClient }
+	| { type: "discord"; client: DiscordClient; guildId: string };
 
 function buildGenericIntro(phantomName: string, _role: RoleTemplate): string {
 	return [
@@ -44,20 +50,24 @@ function buildPersonalizedIntro(phantomName: string, _role: RoleTemplate, profil
  * Falls back to generic intro if profiling fails or no owner is configured.
  */
 export async function startOnboarding(
-	slack: SlackChannel,
+	channel: PrimaryChannel,
 	target: OnboardingTarget,
 	phantomName: string,
 	role: RoleTemplate,
 	db: Database,
-	slackClient?: SlackProfileClient,
+	profilerClient?: ProfilerClient,
 ): Promise<OwnerProfile | null> {
 	markOnboardingStarted(db);
 
-	// If we have a DM target and a slack client, profile the owner for personalization
+	// Profile the owner for personalization if a profiler client is available
 	let profile: OwnerProfile | null = null;
-	if (target.type === "dm" && slackClient) {
+	if (target.type === "dm" && profilerClient) {
 		try {
-			profile = await profileOwner(slackClient, target.userId);
+			if (profilerClient.type === "slack") {
+				profile = await profileOwner(profilerClient.client, target.userId);
+			} else {
+				profile = await profileDiscordOwner(profilerClient.client, profilerClient.guildId, target.userId);
+			}
 			console.log(`[onboarding] Profiled owner: ${profile.name}${profile.title ? ` (${profile.title})` : ""}`);
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -72,10 +82,10 @@ export async function startOnboarding(
 	const hasUsefulProfile = profile !== null && hasPersonalizationData(profile);
 
 	if (target.type === "dm") {
-		await slack.sendDm(target.userId, intro);
+		await channel.sendDm(target.userId, intro);
 		console.log(`[onboarding] Introduction sent as DM to user ${target.userId}`);
 	} else {
-		await slack.postToChannel(target.channelId, intro);
+		await channel.postToChannel(target.channelId, intro);
 		console.log(`[onboarding] Introduction posted to channel ${target.channelId}`);
 	}
 

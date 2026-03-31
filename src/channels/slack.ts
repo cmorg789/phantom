@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { App, type LogLevel } from "@slack/bolt";
 import type { SlackBlock } from "./feedback.ts";
 import { buildFeedbackBlocks } from "./feedback.ts";
+import type { PrimaryChannel, ReactionHandler } from "./primary-channel.ts";
 import { registerSlackActions } from "./slack-actions.ts";
 import { splitMessage, toSlackMarkdown, truncateForSlack } from "./slack-formatter.ts";
-import type { Channel, ChannelCapabilities, InboundMessage, OutboundMessage, SentMessage } from "./types.ts";
+import type { ChannelCapabilities, InboundMessage, OutboundMessage, SentMessage } from "./types.ts";
 
 export type SlackChannelConfig = {
 	botToken: string;
@@ -15,15 +16,7 @@ export type SlackChannelConfig = {
 
 type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
 
-type ReactionHandler = (event: {
-	reaction: string;
-	userId: string;
-	messageTs: string;
-	channel: string;
-	isPositive: boolean;
-}) => void;
-
-export class SlackChannel implements Channel {
+export class SlackChannel implements PrimaryChannel {
 	readonly id = "slack";
 	readonly name = "Slack";
 	readonly capabilities: ChannelCapabilities = {

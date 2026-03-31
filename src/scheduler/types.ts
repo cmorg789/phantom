@@ -32,7 +32,7 @@ export const ScheduleSchema = z.discriminatedUnion("kind", [AtScheduleSchema, Ev
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
 export const JobDeliverySchema = z.object({
-	channel: z.enum(["slack", "none"]).default("slack"),
+	channel: z.enum(["slack", "discord", "none"]).default("slack"),
 	target: z.string().default("owner").describe('"owner" or a specific Slack user/channel ID'),
 });
 export type JobDelivery = z.infer<typeof JobDeliverySchema>;

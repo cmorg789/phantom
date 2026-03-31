@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime } from "../agent/runtime.ts";
-import type { SlackChannel } from "../channels/slack.ts";
+import type { PrimaryChannel } from "../channels/primary-channel.ts";
 import { computeBackoffNextRun, computeNextRunAt, parseScheduleValue, serializeScheduleValue } from "./schedule.ts";
 import type { JobCreateInput, JobRow, JobType, ScheduledJob, WakeupContext } from "./types.ts";
 
@@ -22,16 +22,13 @@ const DEFAULT_SELF_SCHEDULE_LIMITS: SelfScheduleLimits = {
 type SchedulerDeps = {
 	db: Database;
 	runtime: AgentRuntime;
-	slackChannel?: SlackChannel;
-	ownerUserId?: string;
 	selfScheduleLimits?: SelfScheduleLimits;
 };
 
 export class Scheduler {
 	private db: Database;
 	private runtime: AgentRuntime;
-	private slackChannel: SlackChannel | undefined;
-	private ownerUserId: string | undefined;
+	private primaryChannels = new Map<string, { channel: PrimaryChannel; ownerUserId?: string }>();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private running = false;
 	private executing = false;
@@ -40,15 +37,17 @@ export class Scheduler {
 	constructor(deps: SchedulerDeps) {
 		this.db = deps.db;
 		this.runtime = deps.runtime;
-		this.slackChannel = deps.slackChannel;
-		this.ownerUserId = deps.ownerUserId;
 		this.selfScheduleLimits = deps.selfScheduleLimits ?? DEFAULT_SELF_SCHEDULE_LIMITS;
 	}
 
-	/** Set Slack channel after construction (for lazy wiring when channels init after scheduler) */
-	setSlackChannel(channel: SlackChannel, ownerUserId?: string): void {
-		this.slackChannel = channel;
-		if (ownerUserId) this.ownerUserId = ownerUserId;
+	/** Register a primary channel for delivery (e.g. "slack", "discord"). */
+	setPrimaryChannel(channelId: string, channel: PrimaryChannel, ownerUserId?: string): void {
+		this.primaryChannels.set(channelId, { channel, ownerUserId });
+	}
+
+	/** Backwards-compatible alias for setPrimaryChannel("slack", ...). */
+	setSlackChannel(channel: PrimaryChannel, ownerUserId?: string): void {
+		this.setPrimaryChannel("slack", channel, ownerUserId);
 	}
 
 	async start(): Promise<void> {
@@ -337,24 +336,35 @@ export class Scheduler {
 	private async deliverResult(job: ScheduledJob, text: string): Promise<void> {
 		if (job.delivery.channel === "none") return;
 
-		if (job.delivery.channel === "slack" && this.slackChannel) {
-			const target = job.delivery.target;
-			if (target === "owner" && this.ownerUserId) {
-				await this.slackChannel.sendDm(this.ownerUserId, text);
-			} else if (target.startsWith("C")) {
-				await this.slackChannel.postToChannel(target, text);
-			} else if (target.startsWith("U")) {
-				await this.slackChannel.sendDm(target, text);
+		const entry = this.primaryChannels.get(job.delivery.channel);
+		if (!entry) return;
+
+		const { channel, ownerUserId } = entry;
+		const target = job.delivery.target;
+
+		if (target === "owner" && ownerUserId) {
+			await channel.sendDm(ownerUserId, text);
+		} else if (target !== "owner") {
+			// Try to determine if it's a user or channel ID.
+			// Slack: U=user, C=channel. Discord: all snowflakes, default to DM.
+			if (target.startsWith("C")) {
+				await channel.postToChannel(target, text);
+			} else {
+				await channel.sendDm(target, text);
 			}
 		}
 	}
 
 	private notifyOwner(text: string): void {
-		if (this.slackChannel && this.ownerUserId) {
-			this.slackChannel.sendDm(this.ownerUserId, text).catch((err: unknown) => {
-				const msg = err instanceof Error ? err.message : String(err);
-				console.error(`[scheduler] Failed to notify owner: ${msg}`);
-			});
+		// Notify via first available channel that has an owner configured
+		for (const [, entry] of this.primaryChannels) {
+			if (entry.ownerUserId) {
+				entry.channel.sendDm(entry.ownerUserId, text).catch((err: unknown) => {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.error(`[scheduler] Failed to notify owner: ${msg}`);
+				});
+				return;
+			}
 		}
 	}
 
