@@ -72,7 +72,7 @@ export class DiscordChannel implements PrimaryChannel {
 				if (this.client.isReady()) {
 					resolve();
 				} else {
-					this.client.once("ready", () => resolve());
+					this.client.once("clientReady", () => resolve());
 				}
 			});
 			this.connectionState = "connected";
@@ -92,7 +92,7 @@ export class DiscordChannel implements PrimaryChannel {
 				if (this.client.isReady()) {
 					resolve();
 				} else {
-					this.client.once("ready", () => resolve());
+					this.client.once("clientReady", () => resolve());
 				}
 			});
 			this.connectionState = "connected";
