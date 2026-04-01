@@ -42,6 +42,7 @@ export class DiscordChannel implements PrimaryChannel {
 	private connectionState: ConnectionState = "disconnected";
 	private ownerUserId: string | null;
 	readonly guildId: string;
+	private botToken: string;
 	private phantomName = "Phantom";
 	private rejectedUsers = new Set<string>();
 
@@ -57,6 +58,7 @@ export class DiscordChannel implements PrimaryChannel {
 			],
 		});
 		this.guildId = config.guildId;
+		this.botToken = config.botToken;
 		this.ownerUserId = config.ownerUserId ?? null;
 		this.registerEventHandlers();
 		registerDiscordInteractions(this.client);
@@ -65,7 +67,7 @@ export class DiscordChannel implements PrimaryChannel {
 	async connect(): Promise<void> {
 		this.connectionState = "connecting";
 		try {
-			await this.client.login(this.client.token ?? "");
+			await this.client.login(this.botToken);
 			await new Promise<void>((resolve) => {
 				if (this.client.isReady()) {
 					resolve();
