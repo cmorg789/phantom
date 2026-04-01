@@ -7,5 +7,5 @@
 discord:
   enabled: true
   bot_token: ${DISCORD_BOT_TOKEN}
-  guild_id: ${DISCORD_GUILD_ID}
-  owner_user_id: ${DISCORD_OWNER_USER_ID}
+  guild_id: "${DISCORD_GUILD_ID}"
+  owner_user_id: "${DISCORD_OWNER_USER_ID}"
