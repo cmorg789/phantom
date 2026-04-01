@@ -69,9 +69,9 @@ export const WebhookChannelConfigSchema = z.object({
 export const DiscordChannelConfigSchema = z.object({
 	enabled: z.boolean().default(false),
 	bot_token: z.string().min(1),
-	guild_id: z.string().min(1),
-	default_channel_id: z.string().optional(),
-	owner_user_id: z.string().optional(),
+	guild_id: z.coerce.string().min(1),
+	default_channel_id: z.coerce.string().optional(),
+	owner_user_id: z.coerce.string().optional(),
 });
 
 export const ChannelsConfigSchema = z.object({
